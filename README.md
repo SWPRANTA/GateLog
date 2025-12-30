@@ -37,11 +37,12 @@ A modern attendance tracking app for Android, built with React Native and Expo. 
 
 ### Option 1: Download APK (Recommended)
 
-1. Download the latest APK from the [Releases](../../releases) page
-2. On your Android device, enable **Install from Unknown Sources**:
+1. **[⬇️ Download GateLog APK](https://drive.google.com/file/d/1mN-YNuQlfW3dAriHc3r1DyNV8PkHKHoo/view?usp=sharing)** from Google Drive
+2. Extract `app-release.apk` from the zip file
+3. On your Android device, enable **Install from Unknown Sources**:
    - Go to **Settings → Security → Unknown Sources** (or **Install Unknown Apps**)
-3. Open the downloaded APK file and tap **Install**
-4. Launch **GateLog** from your app drawer
+4. Open the APK file and tap **Install**
+5. Launch **GateLog** from your app drawer
 
 ### Option 2: Build from Source
 
