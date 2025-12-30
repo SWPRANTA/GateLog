@@ -203,3 +203,4 @@ This project is open source and available under the [MIT License](LICENSE).
 **Made with ❤️ by Swapnil**
 
 [![GitHub](https://img.shields.io/badge/GitHub-Swapnil-black?logo=github)](https://github.com/Swapnil-Pranta)
+[![Facebook](https://img.shields.io/badge/Facebook-Swapnil-blue?logo=facebook)](https://www.facebook.com/share/1JfgRcWDmB/)
