@@ -6,7 +6,7 @@ import { CyberButton } from '../components/CyberButton';
 import { useTime } from '../context/TimeContext';
 import { useTheme } from '../context/ThemeContext';
 import { Settings, FileText, Calendar } from 'lucide-react-native';
-import { format } from 'date-fns';
+import { format, startOfDay } from 'date-fns';
 import { TouchableOpacity, Linking } from 'react-native';
 import { formatDuration } from '../utils/format';
 
@@ -82,6 +82,13 @@ const GoalText = styled.Text`
   margin-top: 10px;
 `;
 
+const ExpectedLeaveText = styled.Text`
+  color: ${props => props.theme.colors.primary};
+  font-size: 13px;
+  margin-top: 8px;
+  font-weight: 500;
+`;
+
 const SignatureContainer = styled.View`
   flex-direction: row;
   align-items: center;
@@ -104,7 +111,7 @@ const SignatureLink = styled.Text`
 
 const DashboardScreen = ({ navigation }: any) => {
   const { theme } = useTheme();
-  const { status, punch, getWeeklyProgress, getTodayProgress, logs, goals, getEffectiveWeeklyGoal } = useTime();
+  const { status, punch, getWeeklyProgress, getTodayProgress, logs, goals, getEffectiveWeeklyGoal, leaves, holidays } = useTime();
   const [weeklyHours, setWeeklyHours] = useState(0);
   const [todayHours, setTodayHours] = useState(0);
 
@@ -118,12 +125,37 @@ const DashboardScreen = ({ navigation }: any) => {
     return () => clearInterval(interval);
   }, [logs]);
 
-  const isFri = new Date().getDay() === 5;
+  const now = new Date();
+  const isFri = now.getDay() === 5;
   const dailyGoal = isFri ? goals.friday : goals.daily;
-  const dailyProgress = todayHours / dailyGoal;
+  const isLeaveToday = leaves.some(l => l.date === format(now, 'yyyy-MM-dd'));
+  const isHolidayToday = holidays.some(h => h.date === format(now, 'yyyy-MM-dd'));
+
+  // If leave/holiday, the "goal" is effectively 0 for working, but we want to show the credited time.
+  // The user asked to "Show the expected leave time".
+  const dailyProgress = isLeaveToday || isHolidayToday ? 1 : (todayHours / dailyGoal);
 
   const weeklyGoal = getEffectiveWeeklyGoal();
-  const weeklyProgress = weeklyGoal > 0 ? weeklyHours / weeklyGoal : (weeklyHours > 0 ? 1 : 0);
+  const weeklyProgress = weeklyGoal > 0 ? weeklyHours / weeklyGoal : (weeklyHours > 0 || isLeaveToday || isHolidayToday ? 1 : 0);
+
+  // Calculate expected leave time based on first check-in of the day
+  const getExpectedLeaveTime = () => {
+    if (isLeaveToday || isHolidayToday) return null;
+
+    const todayStart = startOfDay(now).getTime();
+    const todayLogs = logs.filter(l => l.timestamp >= todayStart);
+
+    // Find the first ENTRY log of today
+    const firstEntry = todayLogs.find(l => l.type === 'ENTRY');
+    if (!firstEntry) return null;
+
+    // Calculate expected leave time: first entry + daily goal hours
+    const expectedLeaveMs = firstEntry.timestamp + (dailyGoal * 60 * 60 * 1000);
+    return new Date(expectedLeaveMs);
+  };
+
+  const expectedLeaveTime = getExpectedLeaveTime();
+  const goalNotMet = todayHours < dailyGoal;
 
   return (
     <PageContainer>
@@ -148,12 +180,17 @@ const DashboardScreen = ({ navigation }: any) => {
               progress={dailyProgress}
               size={160}
               strokeWidth={15}
-              label={formatDuration(todayHours)}
-              subLabel={`Daily (${dailyGoal}h)`}
-              color={theme.colors.primary}
+              label={isLeaveToday || isHolidayToday ? "LEAVE" : formatDuration(todayHours)}
+              subLabel={isLeaveToday || isHolidayToday ? `Credited: ${dailyGoal}h` : `Daily (${dailyGoal}h)`}
+              color={isLeaveToday || isHolidayToday ? theme.colors.success : theme.colors.primary}
               extraColor={theme.colors.primary}
             />
-            {todayHours >= dailyGoal && <GoalText>GOAL MET</GoalText>}
+            {(todayHours >= dailyGoal || isLeaveToday || isHolidayToday) && <GoalText>GOAL MET</GoalText>}
+            {expectedLeaveTime && goalNotMet && (
+              <ExpectedLeaveText>
+                Leave by {format(expectedLeaveTime, 'h:mm a')}
+              </ExpectedLeaveText>
+            )}
           </ProgressWrapper>
 
           <ProgressWrapper>
@@ -166,7 +203,7 @@ const DashboardScreen = ({ navigation }: any) => {
               color={theme.colors.secondary}
               extraColor={theme.colors.secondary}
             />
-            {weeklyHours >= weeklyGoal && <GoalText>GOAL MET</GoalText>}
+            {(weeklyHours >= weeklyGoal) && <GoalText>GOAL MET</GoalText>}
           </ProgressWrapper>
         </ProgressContainer>
 

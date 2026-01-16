@@ -177,9 +177,24 @@ export const TimeProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return d >= start && d <= end;
         });
 
+        // Find leaves in current week
+        const weekLeaves = leaves.filter(l => {
+            const d = new Date(l.date);
+            return d >= start && d <= end;
+        });
+
         let reduction = 0;
+
+        // Deduct for holidays
         weekHolidays.forEach(h => {
             const d = new Date(h.date);
+            const isFri = d.getDay() === 5;
+            reduction += isFri ? goals.friday : goals.daily;
+        });
+
+        // Deduct for leaves
+        weekLeaves.forEach(l => {
+            const d = new Date(l.date);
             const isFri = d.getDay() === 5;
             reduction += isFri ? goals.friday : goals.daily;
         });

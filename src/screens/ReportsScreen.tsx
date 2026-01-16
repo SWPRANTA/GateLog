@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import styled from 'styled-components/native';
 import { PageContainer } from '../components/PageContainer';
 import { CyberButton } from '../components/CyberButton';
@@ -8,10 +8,12 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay, eachDayOfInterval, isWithinInterval, addDays } from 'date-fns';
-import { Alert, FlatList, View, Platform, TouchableOpacity } from 'react-native';
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay, eachDayOfInterval, isWithinInterval, addDays, addMonths, subMonths } from 'date-fns';
+import { Alert, FlatList, View, Platform, TouchableOpacity, Dimensions, ScrollView, PanResponder } from 'react-native';
 import { formatDuration } from '../utils/format';
 import DateTimePicker from '@react-native-community/datetimepicker';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const ButtonGroup = styled.View`
   width: 100%;
@@ -182,6 +184,44 @@ const CSVButtonContainer = styled.View`
   margin-bottom: 10px;
 `;
 
+const TabBar = styled.View`
+  flex-direction: row;
+  border-bottom-width: 1px;
+  border-bottom-color: ${props => props.theme.colors.border};
+  margin-bottom: 10px;
+`;
+
+const TabItem = styled.TouchableOpacity<{ active: boolean }>`
+  flex: 1;
+  padding: 15px;
+  align-items: center;
+  border-bottom-width: 2px;
+  border-bottom-color: ${props => props.active ? props.theme.colors.primary : 'transparent'};
+`;
+
+const TabText = styled.Text<{ active: boolean }>`
+  color: ${props => props.active ? props.theme.colors.primary : props.theme.colors.textSecondary};
+  font-weight: bold;
+  font-size: 16px;
+`;
+
+const MonthHeader = styled.View`
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+`;
+
+const MonthTitle = styled.Text`
+    font-size: 18px;
+    font-weight: bold;
+    color: ${props => props.theme.colors.text};
+`;
+
+const IconButton = styled.TouchableOpacity`
+    padding: 5px 10px;
+`;
+
 const ReportsScreen = () => {
   const { logs, leaves, holidays, weeklyHolidays, getDurationForDate, goals, exportAllData, importAllData } = useTime();
   const { theme } = useTheme();
@@ -192,11 +232,49 @@ const ReportsScreen = () => {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
 
-  // Calendar Logic - now uses weeklyHolidays from context
+  // Tab State
+  const [activeTab, setActiveTab] = useState(0); // 0 = Monthly, 1 = Daily
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Calendar Month State
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+
+  const handleTabPress = (index: number) => {
+    setActiveTab(index);
+    scrollViewRef.current?.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
+  };
+
+  const onScroll = (event: any) => {
+    const slide = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+    if (slide !== activeTab) {
+      setActiveTab(slide);
+    }
+  };
+
+  // Pan Responder for Calendar Swipes
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Only capture horizontal swipes
+        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 30;
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        if (gestureState.dx > 50) {
+          // Swipe Right -> Previous Month
+          setCurrentMonth(prev => subMonths(prev, 1));
+        } else if (gestureState.dx < -50) {
+          // Swipe Left -> Next Month
+          setCurrentMonth(prev => addMonths(prev, 1));
+        }
+      },
+    })
+  ).current;
+
+
+  // Calendar Logic - using currentMonth state
   const renderCalendar = () => {
-    const now = new Date();
-    const daysInMonth = endOfMonth(now).getDate();
-    const startDay = startOfMonth(now).getDay(); // 0 is Sun
+    const daysInMonth = endOfMonth(currentMonth).getDate();
+    const startDay = startOfMonth(currentMonth).getDay(); // 0 is Sun
     const adjustedStart = startDay === 0 ? 6 : startDay - 1; // Mon=0
 
     const cells = [];
@@ -206,7 +284,7 @@ const ReportsScreen = () => {
     }
 
     for (let d = 1; d <= daysInMonth; d++) {
-      const date = new Date(now.getFullYear(), now.getMonth(), d);
+      const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), d);
       const dateStr = format(date, 'yyyy-MM-dd');
       const duration = getDurationForDate(date);
       const dayOfWeek = date.getDay();
@@ -244,6 +322,11 @@ const ReportsScreen = () => {
     }
     return cells;
   };
+
+  const changeMonth = (increment: number) => {
+    setCurrentMonth(prev => increment > 0 ? addMonths(prev, 1) : subMonths(prev, 1));
+  };
+
 
   // Generate PDF report for selected date range with weekly grouping
   const generateReport = async () => {
@@ -502,10 +585,9 @@ const ReportsScreen = () => {
 
   const filteredLogs = useMemo(() => {
     const now = new Date();
-    const start = startOfMonth(now);
-    const end = endOfMonth(now);
-    return logs.filter(l => l.timestamp >= start.getTime() && l.timestamp <= end.getTime());
-  }, [logs]);
+    // Use startDate / endDate for the List
+    return logs.filter(l => l.timestamp >= startDate.getTime() && l.timestamp <= endDate.getTime());
+  }, [logs, startDate, endDate]);
 
   const pairedList = useMemo(() => {
     return pairLogs(filteredLogs).reverse(); // Newest first
@@ -523,92 +605,124 @@ const ReportsScreen = () => {
 
   return (
     <PageContainer>
-      <View style={{ flex: 1 }}>
-        <Title style={{ marginTop: 5, marginBottom: 0 }}>Reports</Title>
-        <Title style={{ fontSize: 14, marginTop: 0, marginBottom: 0 }}>Monthly Performance</Title>
+      <Title style={{ marginTop: 5, marginBottom: 10 }}>Reports</Title>
 
-        <WeekHeader>
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
-            <WeekDayText key={day}>{day}</WeekDayText>
-          ))}
-        </WeekHeader>
+      <TabBar>
+        <TabItem active={activeTab === 0} onPress={() => handleTabPress(0)}>
+          <TabText active={activeTab === 0}>Calendar</TabText>
+        </TabItem>
+        <TabItem active={activeTab === 1} onPress={() => handleTabPress(1)}>
+          <TabText active={activeTab === 1}>Daily Logs</TabText>
+        </TabItem>
+      </TabBar>
 
-        <CalendarGrid>
-          {renderCalendar()}
-        </CalendarGrid>
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={onScroll}
+        contentContainerStyle={{ width: SCREEN_WIDTH * 2 }}
+      >
+        {/* Calendar View */}
+        <View style={{ width: SCREEN_WIDTH, paddingHorizontal: 10 }}>
+          <MonthHeader>
+            <IconButton onPress={() => changeMonth(-1)}>
+              <Title style={{ fontSize: 20 }}>{"<"}</Title>
+            </IconButton>
+            <MonthTitle>{format(currentMonth, 'MMMM yyyy')}</MonthTitle>
+            <IconButton onPress={() => changeMonth(1)}>
+              <Title style={{ fontSize: 20 }}>{">"}</Title>
+            </IconButton>
+          </MonthHeader>
 
-        {/* Date Range Picker */}
-        <DateRangeContainer>
-          <DatePickerButton onPress={() => setShowStartPicker(true)}>
-            <DatePickerLabel>Start Date</DatePickerLabel>
-            <DatePickerValue>{format(startDate, 'MMM dd, yyyy')}</DatePickerValue>
-          </DatePickerButton>
-          <DatePickerButton onPress={() => setShowEndPicker(true)}>
-            <DatePickerLabel>End Date</DatePickerLabel>
-            <DatePickerValue>{format(endDate, 'MMM dd, yyyy')}</DatePickerValue>
-          </DatePickerButton>
-        </DateRangeContainer>
+          <View {...panResponder.panHandlers}>
+            <WeekHeader>
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                <WeekDayText key={day}>{day}</WeekDayText>
+              ))}
+            </WeekHeader>
 
-        {showStartPicker && (
-          <DateTimePicker
-            value={startDate}
-            mode="date"
-            display="default"
-            onChange={onStartDateChange}
-          />
-        )}
-        {showEndPicker && (
-          <DateTimePicker
-            value={endDate}
-            mode="date"
-            display="default"
-            onChange={onEndDateChange}
-          />
-        )}
+            <CalendarGrid>
+              {renderCalendar()}
+            </CalendarGrid>
+          </View>
 
-        <View style={{ flex: 1, paddingHorizontal: 20 }}>
-          <Title style={{ fontSize: 16, marginTop: 2, marginBottom: 5, textAlign: 'left' }}>Daily Records</Title>
-          <FlatList
-            data={pairedList}
-            keyExtractor={(item, index) => index.toString()}
-            renderItem={({ item }) => (
-              <LogItem>
-                <View>
-                  <LogDate>{item.date}</LogDate>
-                  <LogTime>{item.entry} - {item.exit}</LogTime>
-                </View>
-                <LogDuration met={item.duration >= 5}>{item.duration.toFixed(2)}h</LogDuration>
-              </LogItem>
+          <View style={{ marginTop: 20 }}>
+            <CyberButton
+              title="Generate Report (PDF)"
+              onPress={generateReport}
+              size="small"
+              style={{ marginBottom: 10 }}
+            />
+            <CSVButtonContainer>
+              <CyberButton
+                title="Export CSV"
+                onPress={handleExportCSV}
+                variant="secondary"
+                size="small"
+                style={{ flex: 1 }}
+              />
+              <CyberButton
+                title="Import Data"
+                onPress={handleImportCSV}
+                variant="secondary"
+                size="small"
+                style={{ flex: 1 }}
+              />
+            </CSVButtonContainer>
+          </View>
+        </View>
+
+        {/* Daily Logs View */}
+        <View style={{ width: SCREEN_WIDTH }}>
+          <View style={{ paddingHorizontal: 20, flex: 1 }}>
+            <DateRangeContainer>
+              <DatePickerButton onPress={() => setShowStartPicker(true)}>
+                <DatePickerLabel>Start Date</DatePickerLabel>
+                <DatePickerValue>{format(startDate, 'MMM dd, yyyy')}</DatePickerValue>
+              </DatePickerButton>
+              <DatePickerButton onPress={() => setShowEndPicker(true)}>
+                <DatePickerLabel>End Date</DatePickerLabel>
+                <DatePickerValue>{format(endDate, 'MMM dd, yyyy')}</DatePickerValue>
+              </DatePickerButton>
+            </DateRangeContainer>
+
+            {showStartPicker && (
+              <DateTimePicker
+                value={startDate}
+                mode="date"
+                display="default"
+                onChange={onStartDateChange}
+              />
             )}
-            contentContainerStyle={{ paddingBottom: 20 }}
-          />
-        </View>
+            {showEndPicker && (
+              <DateTimePicker
+                value={endDate}
+                mode="date"
+                display="default"
+                onChange={onEndDateChange}
+              />
+            )}
 
-        <View style={{ padding: 10, paddingBottom: 10 }}>
-          <CyberButton
-            title="Generate Report (PDF)"
-            onPress={generateReport}
-            size="small"
-            style={{ marginBottom: 10 }}
-          />
-          <CSVButtonContainer>
-            <CyberButton
-              title="Export CSV"
-              onPress={handleExportCSV}
-              variant="secondary"
-              size="small"
-              style={{ flex: 1 }}
+            <Title style={{ fontSize: 16, marginTop: 2, marginBottom: 5, textAlign: 'left' }}>Daily Records</Title>
+            <FlatList
+              data={pairedList}
+              keyExtractor={(item, index) => index.toString()}
+              renderItem={({ item }) => (
+                <LogItem>
+                  <View>
+                    <LogDate>{item.date}</LogDate>
+                    <LogTime>{item.entry} - {item.exit}</LogTime>
+                  </View>
+                  <LogDuration met={item.duration >= 5}>{item.duration.toFixed(2)}h</LogDuration>
+                </LogItem>
+              )}
+              contentContainerStyle={{ paddingBottom: 20 }}
             />
-            <CyberButton
-              title="Import Data"
-              onPress={handleImportCSV}
-              variant="secondary"
-              size="small"
-              style={{ flex: 1 }}
-            />
-          </CSVButtonContainer>
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </PageContainer>
   );
 };
